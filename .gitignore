@@ -14,3 +14,5 @@ build/
 # IDE files
 .vscode/
 .idea/
+node_modules/
+.env
