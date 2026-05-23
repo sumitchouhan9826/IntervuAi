@@ -24,7 +24,7 @@ import {
 export const generateInterview = async (req, res) => {
   try {
     const { userId } = getAuth(req);
-    const { type, jobRole, experience, count } = req.body;
+    const { type, jobRole, experience, count, resumeText, jdText } = req.body;
 
     // Validate required fields
     if (!type || !jobRole) {
@@ -43,13 +43,15 @@ export const generateInterview = async (req, res) => {
 
     const experienceYears = Number(experience) || 0;
     const questionCount = Math.min(Math.max(Number(count) || 5, 1), 15); // Clamp 1-15
+    const contextText = type === 'resume' ? resumeText : type === 'jd' ? jdText : '';
 
     // Generate questions using AI
     const questions = await generateQuestions(
       jobRole,
       experienceYears,
       type,
-      questionCount
+      questionCount,
+      contextText
     );
 
     // Create interview document
@@ -63,6 +65,7 @@ export const generateInterview = async (req, res) => {
         question: q.question,
         type: q.type,
         difficulty: q.difficulty,
+        explanation: q.explanation,
       })),
       status: 'in-progress',
     });
@@ -145,6 +148,8 @@ export const submitAnswer = async (req, res) => {
     interview.questions[idx].answer = answer;
     interview.questions[idx].feedback = evaluation.feedback;
     interview.questions[idx].score = evaluation.score;
+    interview.questions[idx].strengths = evaluation.strengths;
+    interview.questions[idx].improvements = evaluation.improvements;
 
     // Update status to in-progress if it was pending
     if (interview.status === 'pending') {
@@ -285,7 +290,7 @@ export const listInterviews = async (req, res) => {
         .sort(sort)
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum)
-        .select('-questions.answer -questions.feedback'), // Lighter payload for list
+        .select('-questions.answer -questions.feedback -questions.explanation'), // Lighter payload for list
       Interview.countDocuments(filter),
     ]);
 

@@ -47,6 +47,31 @@ export const uploadResume = async (req, res) => {
 };
 
 /**
+ * Parse a resume PDF file and return the extracted text content.
+ * POST /api/resume/parse
+ */
+export const parseResume = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Extract text from PDF buffer
+    const text = await extractTextFromPDF(req.file.buffer);
+
+    res.status(200).json({
+      success: true,
+      message: 'Resume parsed successfully',
+      text,
+    });
+  } catch (error) {
+    console.error('Parse resume error:', error);
+    res.status(500).json({ error: 'Failed to parse resume PDF file: ' + error.message });
+  }
+};
+
+
+/**
  * Analyze resume text using AI and persist the analysis results.
  * POST /api/resume/analyze
  */

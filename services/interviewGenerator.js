@@ -20,12 +20,13 @@ import {
  * @param {number} [count=5] - Number of questions to generate
  * @returns {Promise<Array>} Array of question objects
  */
-export async function generateQuestions(jobRole, experience, type, count = 5) {
+export async function generateQuestions(jobRole, experience, type, count = 5, contextText = '') {
   const { system, user } = getInterviewQuestionsPrompt(
     jobRole,
     experience,
     type,
-    count
+    count,
+    contextText
   );
 
   const result = await chatCompletion(system, user, {
@@ -45,6 +46,7 @@ export async function generateQuestions(jobRole, experience, type, count = 5) {
     type: q.type || 'technical',
     difficulty: q.difficulty || 'medium',
     expectedTopics: q.expectedTopics || [],
+    explanation: q.explanation || q.idealAnswer || '',
   }));
 }
 

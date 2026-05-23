@@ -14,7 +14,7 @@
  * @param {number} [count=5] - Number of questions to generate
  * @returns {{ system: string, user: string }} Prompt pair
  */
-export function getInterviewQuestionsPrompt(jobRole, experience, type, count = 5) {
+export function getInterviewQuestionsPrompt(jobRole, experience, type, count = 5, contextText = '') {
   const system = `You are an expert technical interviewer with 15+ years of experience conducting interviews at top tech companies. Your task is to generate realistic, high-quality interview questions.
 
 You MUST respond with valid JSON in the following format:
@@ -24,7 +24,8 @@ You MUST respond with valid JSON in the following format:
       "question": "The interview question text",
       "type": "technical|behavioral|hr|system-design",
       "difficulty": "easy|medium|hard",
-      "expectedTopics": ["topic1", "topic2"]
+      "expectedTopics": ["topic1", "topic2"],
+      "explanation": "A high-quality explanation and breakdown of what a correct/ideal answer should cover, including core concepts, solution steps, or best practices for the question."
     }
   ]
 }
@@ -36,9 +37,10 @@ Guidelines:
 - For technical roles, include coding concepts, system design, and problem-solving
 - For behavioral questions, use the STAR method format
 - Each question should be specific and relevant to the role
-- Include expectedTopics that a strong candidate would mention`;
+- Include expectedTopics that a strong candidate would mention
+- Provide a detailed and precise explanation or ideal answer breakdown for each question in the "explanation" field`;
 
-  const user = `Generate ${count} interview questions for the following:
+  let user = `Generate ${count} interview questions for the following:
 - Job Role: ${jobRole}
 - Experience Level: ${experience} years
 - Interview Type: ${type}
@@ -48,6 +50,10 @@ ${type === 'jd' ? 'Focus questions on practical skills and scenarios relevant to
 ${type === 'role' ? 'Generate a well-rounded mix of technical, behavioral, and role-specific questions.' : ''}
 
 Adjust difficulty: ${experience <= 2 ? 'mostly easy/medium for a junior candidate' : experience <= 5 ? 'medium/hard for a mid-level candidate' : 'mostly hard with system design for a senior candidate'}.`;
+
+  if (contextText && contextText.trim()) {
+    user += `\n\nHere is the actual context text (resume or job description details) to customize these questions specifically around:\n---\n${contextText}\n---`;
+  }
 
   return { system, user };
 }

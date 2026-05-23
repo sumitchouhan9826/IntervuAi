@@ -3,11 +3,9 @@
  * Handles PDF text extraction and AI-powered resume analysis.
  */
 
-import * as pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import { chatCompletion } from './groq.service.js';
 import { getResumeAnalysisPrompt } from './aiPrompts.js';
-
-const pdf = pdfParse.default;
 
 /**
  * Extract text content from a PDF buffer.
@@ -17,8 +15,13 @@ const pdf = pdfParse.default;
  * @throws {Error} If PDF parsing fails or produces no text
  */
 export async function extractTextFromPDF(buffer) {
+  let parser = null;
   try {
-    const data = await pdf(buffer);
+    console.log('[ResumeAnalyzer] Initializing PDFParse on buffer of size:', buffer.length);
+    parser = new PDFParse({ data: buffer });
+    
+    console.log('[ResumeAnalyzer] Parsing text from PDF buffer...');
+    const data = await parser.getText();
 
     if (!data.text || data.text.trim().length === 0) {
       throw new Error('No text content could be extracted from the PDF');
@@ -30,13 +33,24 @@ export async function extractTextFromPDF(buffer) {
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
+    console.log('[ResumeAnalyzer] PDF parsed successfully, extracted character length:', cleanedText.length);
     return cleanedText;
   } catch (error) {
+    console.error('[ResumeAnalyzer] Error during PDF text extraction:', error);
     if (error.message.includes('No text content')) {
       throw error;
     }
 
     throw new Error(`Failed to parse PDF: ${error.message}`);
+  } finally {
+    if (parser) {
+      try {
+        console.log('[ResumeAnalyzer] Destroying PDFParse instance to release memory...');
+        await parser.destroy();
+      } catch (destroyError) {
+        console.error('[ResumeAnalyzer] Failed to destroy PDFParse instance:', destroyError);
+      }
+    }
   }
 }
 

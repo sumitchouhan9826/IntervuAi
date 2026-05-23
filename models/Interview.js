@@ -35,6 +35,18 @@ const questionSchema = new mongoose.Schema(
       max: 100,
       default: null,
     },
+    explanation: {
+      type: String,
+      default: '',
+    },
+    strengths: {
+      type: [String],
+      default: [],
+    },
+    improvements: {
+      type: [String],
+      default: [],
+    },
   },
   { _id: true }
 );

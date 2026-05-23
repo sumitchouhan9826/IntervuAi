@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware.js';
-import { uploadResume, uploadMiddleware, analyzeResumeHandler, getAnalyses, getAnalysis } from '../controllers/resume.controller.js';
+import { uploadResume, uploadMiddleware, analyzeResumeHandler, getAnalyses, getAnalysis, parseResume } from '../controllers/resume.controller.js';
 
 const router = Router();
 
@@ -9,6 +9,10 @@ router.use(requireAuth());
 
 // POST /api/resume/upload - Upload a resume file (multipart form-data)
 router.post('/upload', uploadMiddleware, uploadResume);
+
+// POST /api/resume/parse - Parse PDF resume file and return text content
+router.post('/parse', uploadMiddleware, parseResume);
+
 
 // POST /api/resume/analyze - Analyze resume text with AI
 router.post('/analyze', analyzeResumeHandler);
