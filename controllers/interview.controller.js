@@ -11,6 +11,7 @@ import AIFeedback from '../models/AIFeedback.js';
 import ResumeAnalysis from '../models/ResumeAnalysis.js';
 import JDAnalysis from '../models/JDAnalysis.js';
 import User from '../models/User.js';
+import mongoose from 'mongoose';
 import {
   generateQuestions,
   evaluateAnswer,
@@ -20,6 +21,45 @@ import {
   calculateOverallScore,
   generateSessionSummary,
 } from '../services/feedbackEngine.js';
+
+/**
+ * Helper to find a session across Interview, ResumeAnalysis, and JDAnalysis collections.
+ * @param {string} id - Document ID
+ * @param {string} userId - User ID for ownership check
+ * @returns {Promise<{ doc: Object, type: string }|null>}
+ */
+const findSession = async (id, userId) => {
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    console.log('[findSession] Invalid or missing ObjectId format:', id);
+    return null;
+  }
+  
+  console.log('[findSession] Looking up session ID:', id, 'for user:', userId);
+  
+  // 1. Check Interview (Role-based)
+  let doc = await Interview.findOne({ _id: id, userId });
+  if (doc) {
+    console.log('[findSession] Found session in Interview (role-based) collection');
+    return { doc, type: 'role' };
+  }
+
+  // 2. Check ResumeAnalysis
+  doc = await ResumeAnalysis.findOne({ _id: id, userId });
+  if (doc) {
+    console.log('[findSession] Found session in ResumeAnalysis collection');
+    return { doc, type: 'resume' };
+  }
+
+  // 3. Check JDAnalysis
+  doc = await JDAnalysis.findOne({ _id: id, userId });
+  if (doc) {
+    console.log('[findSession] Found session in JDAnalysis collection');
+    return { doc, type: 'jd' };
+  }
+
+  console.log('[findSession] Session not found in any collection');
+  return null;
+};
 
 /**
  * POST /api/interviews/generate
@@ -199,52 +239,59 @@ export const submitAnswer = async (req, res) => {
       });
     }
 
-    // Find the interview
-    const interview = await Interview.findOne({ _id: id, userId });
+    // Find the session across all collections
+    const lookup = await findSession(id, userId);
 
-    if (!interview) {
+    if (!lookup) {
       return res.status(404).json({
         success: false,
-        message: 'Interview not found',
+        message: 'Mock session not found',
       });
     }
 
-    if (interview.status === 'completed') {
+    const { doc: session, type: sessionType } = lookup;
+
+    if (session.status === 'completed') {
       return res.status(400).json({
         success: false,
-        message: 'Cannot submit answers to a completed interview',
+        message: 'Cannot submit answers to a completed mock session',
       });
     }
+
+    // Resolve questions array dynamically
+    const questionsArray = session.generatedQuestions?.length > 0 ? session.generatedQuestions : session.questions;
 
     // Validate question index
     const idx = Number(questionIndex);
-    if (idx < 0 || idx >= interview.questions.length) {
+    if (idx < 0 || idx >= questionsArray.length) {
       return res.status(400).json({
         success: false,
-        message: `Invalid questionIndex. Must be between 0 and ${interview.questions.length - 1}`,
+        message: `Invalid questionIndex. Must be between 0 and ${questionsArray.length - 1}`,
       });
     }
 
+    const roleName = session.role || session.jobRole || 'Software Engineer';
+
     // Evaluate the answer using AI
     const evaluation = await evaluateAnswer(
-      interview.questions[idx].question,
+      questionsArray[idx].question,
       answer,
-      interview.jobRole
+      roleName
     );
 
     // Update the question with answer and feedback
-    interview.questions[idx].answer = answer;
-    interview.questions[idx].feedback = evaluation.feedback;
-    interview.questions[idx].score = evaluation.score;
-    interview.questions[idx].strengths = evaluation.strengths;
-    interview.questions[idx].improvements = evaluation.improvements;
+    questionsArray[idx].answer = answer;
+    questionsArray[idx].feedback = evaluation.feedback;
+    questionsArray[idx].score = evaluation.score;
+    questionsArray[idx].strengths = evaluation.strengths || [];
+    questionsArray[idx].improvements = evaluation.improvements || [];
 
     // Update status to in-progress if it was pending
-    if (interview.status === 'pending') {
-      interview.status = 'in-progress';
+    if (session.status === 'pending') {
+      session.status = 'in-progress';
     }
 
-    await interview.save();
+    await session.save();
 
     res.status(200).json({
       success: true,
@@ -572,6 +619,7 @@ export const getInterview = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      interview: lookup.doc,
       data: lookup.doc,
     });
   } catch (error) {
