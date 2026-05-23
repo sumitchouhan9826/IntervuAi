@@ -1,14 +1,12 @@
-/**
- * Resume Analyzer Service
- * Handles PDF text extraction and AI-powered resume analysis.
- */
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { PDFParse } = require('pdf-parse');
 
-import { PDFParse } from 'pdf-parse';
 import { chatCompletion } from './groq.service.js';
 import { getResumeAnalysisPrompt } from './aiPrompts.js';
 
 /**
- * Extract text content from a PDF buffer.
+ * Extract text content from a PDF buffer using the local PDFParse utility.
  *
  * @param {Buffer} buffer - PDF file buffer
  * @returns {Promise<string>} Extracted text content
@@ -23,7 +21,7 @@ export async function extractTextFromPDF(buffer) {
     console.log('[ResumeAnalyzer] Parsing text from PDF buffer...');
     const data = await parser.getText();
 
-    if (!data.text || data.text.trim().length === 0) {
+    if (!data || !data.text || data.text.trim().length === 0) {
       throw new Error('No text content could be extracted from the PDF');
     }
 
@@ -37,10 +35,6 @@ export async function extractTextFromPDF(buffer) {
     return cleanedText;
   } catch (error) {
     console.error('[ResumeAnalyzer] Error during PDF text extraction:', error);
-    if (error.message.includes('No text content')) {
-      throw error;
-    }
-
     throw new Error(`Failed to parse PDF: ${error.message}`);
   } finally {
     if (parser) {
@@ -56,7 +50,7 @@ export async function extractTextFromPDF(buffer) {
 
 /**
  * Analyze resume text using AI to produce ATS score, strengths,
- * weaknesses, suggestions, and extracted skills.
+ * weaknesses, suggestions, extracted skills, missing skills, mock questions, and difficulty.
  *
  * @param {string} resumeText - Extracted resume text content
  * @returns {Promise<Object>} Analysis result
@@ -73,20 +67,49 @@ export async function analyzeResume(resumeText) {
     maxTokens: 4096,
   });
 
+  // Helper to extract array field checking multiple possible keys
+  const getArrayField = (obj, keys) => {
+    for (const key of keys) {
+      if (obj && Array.isArray(obj[key])) {
+        return obj[key];
+      }
+    }
+    return [];
+  };
+
+  const strengths = getArrayField(result, ['strengths', 'keyStrengths', 'key_strengths', 'Strengths']);
+  const weaknesses = getArrayField(result, ['weaknesses', 'areasOfImprovement', 'improvements', 'Weaknesses', 'weakness']);
+  const suggestions = getArrayField(result, ['suggestions', 'actionableSuggestions', 'recommendations', 'Suggestions', 'suggestion']);
+  const skills = getArrayField(result, ['skills', 'extractedSkills', 'competencies', 'Skills', 'skill']);
+  const missingSkills = getArrayField(result, ['missingSkills', 'skillGaps', 'missing_skills', 'MissingSkills']);
+  const technicalQuestions = getArrayField(result, [
+    'technicalQuestions',
+    'technical_questions',
+    'suggestedTechnicalQuestions',
+    'technical',
+    'TechnicalQuestions'
+  ]);
+  const hrQuestions = getArrayField(result, [
+    'hrQuestions',
+    'hr_questions',
+    'suggestedHrQuestions',
+    'suggestedHRQuestions',
+    'behavioralQuestions',
+    'behavioral_questions',
+    'hr',
+    'HRQuestions'
+  ]);
+
   // Validate and normalize response
   return {
     atsScore: Math.max(0, Math.min(100, Number(result.atsScore) || 0)),
-    strengths: Array.isArray(result.strengths)
-      ? result.strengths
-      : [],
-    weaknesses: Array.isArray(result.weaknesses)
-      ? result.weaknesses
-      : [],
-    suggestions: Array.isArray(result.suggestions)
-      ? result.suggestions
-      : [],
-    skills: Array.isArray(result.skills)
-      ? result.skills
-      : [],
+    strengths,
+    weaknesses,
+    suggestions,
+    skills,
+    missingSkills,
+    technicalQuestions,
+    hrQuestions,
+    difficultyLevel: typeof result.difficultyLevel === 'string' ? result.difficultyLevel : 'Medium',
   };
 }

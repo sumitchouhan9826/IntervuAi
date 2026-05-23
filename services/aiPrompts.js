@@ -14,8 +14,8 @@
  * @param {number} [count=5] - Number of questions to generate
  * @returns {{ system: string, user: string }} Prompt pair
  */
-export function getInterviewQuestionsPrompt(jobRole, experience, type, count = 5, contextText = '') {
-  const system = `You are an expert technical interviewer with 15+ years of experience conducting interviews at top tech companies. Your task is to generate realistic, high-quality interview questions.
+export function getInterviewQuestionsPrompt(jobRole, experience, type, count = 5, contextText = '', seed = '') {
+  const system = `You are an expert technical interviewer with 15+ years of experience conducting interviews at top tech companies. Your task is to generate realistic, high-quality, completely unique interview questions.
 
 You MUST respond with valid JSON in the following format:
 {
@@ -38,18 +38,22 @@ Guidelines:
 - For behavioral questions, use the STAR method format
 - Each question should be specific and relevant to the role
 - Include expectedTopics that a strong candidate would mention
-- Provide a detailed and precise explanation or ideal answer breakdown for each question in the "explanation" field`;
+- Provide a detailed and precise explanation or ideal answer breakdown for each question in the "explanation" field.
+- VERY IMPORTANT: Questions MUST be highly unique, non-predefined, and dynamic. Avoid repeated or generic questions. Use the random session entropy seed provided to diversify the generated questions.`;
 
-  let user = `Generate ${count} interview questions for the following:
+  let user = `Generate ${count} interview questions for the following parameters:
 - Job Role: ${jobRole}
 - Experience Level: ${experience} years
 - Interview Type: ${type}
+- Session Entropy Seed: ${seed || Math.random().toString()}
 
 ${type === 'resume' ? 'Focus questions on skills and experiences typically found in resumes for this role.' : ''}
 ${type === 'jd' ? 'Focus questions on practical skills and scenarios relevant to job descriptions for this role.' : ''}
 ${type === 'role' ? 'Generate a well-rounded mix of technical, behavioral, and role-specific questions.' : ''}
 
-Adjust difficulty: ${experience <= 2 ? 'mostly easy/medium for a junior candidate' : experience <= 5 ? 'medium/hard for a mid-level candidate' : 'mostly hard with system design for a senior candidate'}.`;
+Adjust difficulty: ${experience <= 2 ? 'mostly easy/medium for a junior candidate' : experience <= 5 ? 'medium/hard for a mid-level candidate' : 'mostly hard with system design for a senior candidate'}.
+
+Ensure you select unique and diverse topics (e.g. databases, coding logic, design pattern, security, cloud, soft skills, behavioral conflict resolution) dynamically.`;
 
   if (contextText && contextText.trim()) {
     user += `\n\nHere is the actual context text (resume or job description details) to customize these questions specifically around:\n---\n${contextText}\n---`;
@@ -111,7 +115,11 @@ You MUST respond with valid JSON in the following format:
   "strengths": ["Strength 1", "Strength 2"],
   "weaknesses": ["Weakness 1", "Weakness 2"],
   "suggestions": ["Suggestion 1", "Suggestion 2"],
-  "skills": ["skill1", "skill2", "skill3"]
+  "skills": ["skill1", "skill2"],
+  "missingSkills": ["missingSkill1", "missingSkill2"],
+  "technicalQuestions": ["technicalQuestion1", "technicalQuestion2", "technicalQuestion3"],
+  "hrQuestions": ["hrQuestion1", "hrQuestion2", "hrQuestion3"],
+  "difficultyLevel": "Easy|Medium|Hard"
 }
 
 ATS Score criteria (0-100):
@@ -123,7 +131,7 @@ ATS Score criteria (0-100):
 - Contact information completeness
 - Professional summary quality
 
-Extract ALL technical skills, soft skills, tools, and technologies mentioned.`;
+Extract ALL technical skills, soft skills, tools, and technologies mentioned. Generate high-quality mock interview questions (3 technical and 3 HR) based on the candidate's experience and skills. Recommend missing skills typical for their target roles. Assess overall candidate experience difficulty level.`;
 
   const user = `Analyze the following resume text and provide a comprehensive assessment:
 
@@ -136,7 +144,11 @@ Provide:
 2. Key strengths of the resume
 3. Weaknesses and areas for improvement
 4. Specific, actionable suggestions to improve the resume
-5. A complete list of all skills mentioned (technical, tools, frameworks, soft skills)`;
+5. A complete list of all skills mentioned (technical, tools, frameworks, soft skills)
+6. A list of 3-5 typical missing skills for candidate's target career path
+7. A list of 3 high-quality technical interview questions relevant to the resume skills
+8. A list of 3 high-quality HR / behavioral questions
+9. Overall difficulty level recommendation (Easy, Medium, or Hard) based on experience level`;
 
   return { system, user };
 }

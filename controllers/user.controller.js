@@ -29,9 +29,9 @@ export const syncUser = async (req, res) => {
       {
         clerkId,
         email: email.toLowerCase(),
-        firstName: firstName || '',
-        lastName: lastName || '',
-        profileImage: profileImage || '',
+        name: `${firstName || ''} ${lastName || ''}`.trim() || 'Candidate',
+        imageUrl: profileImage || '',
+        lastLogin: new Date(),
       },
       {
         new: true, // Return updated document
@@ -143,6 +143,35 @@ export const updateProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to update profile',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * GET /api/users/activity
+ * Get current authenticated user's recent activity logs.
+ */
+export const getRecentActivity = async (req, res) => {
+  try {
+    const { userId } = getAuth(req);
+    
+    // Import dynamically or keep standard import at the top
+    const RecentActivity = (await import('../models/RecentActivity.js')).default;
+    
+    const activities = await RecentActivity.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      data: activities,
+    });
+  } catch (error) {
+    console.error('Get recent activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve recent activity',
       error: error.message,
     });
   }

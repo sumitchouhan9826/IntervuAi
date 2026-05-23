@@ -1,10 +1,54 @@
 /**
  * JDAnalysis Model
- * Stores AI-generated analysis of job descriptions,
- * including extracted skills, match percentage, and recommendations.
+ * Handles job description analysis, keyword/relevance calculations, and JD-based mock interview sessions.
  */
 
 import mongoose from 'mongoose';
+
+const questionSchema = new mongoose.Schema(
+  {
+    question: {
+      type: String,
+      required: true,
+    },
+    type: {
+      type: String,
+      default: 'technical',
+    },
+    difficulty: {
+      type: String,
+      enum: ['easy', 'medium', 'hard'],
+      default: 'medium',
+    },
+    answer: {
+      type: String,
+      default: '',
+    },
+    feedback: {
+      type: String,
+      default: '',
+    },
+    score: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
+    },
+    explanation: {
+      type: String,
+      default: '',
+    },
+    strengths: {
+      type: [String],
+      default: [],
+    },
+    improvements: {
+      type: [String],
+      default: [],
+    },
+  },
+  { _id: true }
+);
 
 const jdAnalysisSchema = new mongoose.Schema({
   // Owner — Clerk user ID
@@ -36,6 +80,10 @@ const jdAnalysisSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  requiredSkills: {
+    type: [String],
+    default: [],
+  },
 
   // Experience requirements
   requiredExperience: {
@@ -61,6 +109,38 @@ const jdAnalysisSchema = new mongoose.Schema({
   recommendations: {
     type: [String],
     default: [],
+  },
+
+  // JD-based mock interview sessions
+  generatedQuestions: [questionSchema],
+  questions: [questionSchema], // Alias for uniform controller routing
+
+  // Mock interview aggregates
+  overallScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null,
+  },
+  overallFeedback: {
+    type: String,
+    default: '',
+  },
+  aiAnalysis: {
+    type: String,
+    default: '',
+  },
+
+  // Mock session metadata
+  duration: {
+    type: Number,
+    default: 0,
+  },
+
+  status: {
+    type: String,
+    enum: ['pending', 'in-progress', 'completed'],
+    default: 'pending',
   },
 
   createdAt: {

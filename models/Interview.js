@@ -1,7 +1,6 @@
 /**
  * Interview Model
- * Stores mock interview sessions with AI-generated questions,
- * user answers, feedback, and scoring.
+ * Stores mock interview sessions for ROLE-BASED mock interviews ONLY.
  */
 
 import mongoose from 'mongoose';
@@ -13,9 +12,9 @@ const questionSchema = new mongoose.Schema(
       required: true,
     },
     type: {
-  type: String,
-  default: 'technical',
-},
+      type: String,
+      default: 'technical',
+    },
     difficulty: {
       type: String,
       enum: ['easy', 'medium', 'hard'],
@@ -59,36 +58,44 @@ const interviewSchema = new mongoose.Schema({
     index: true,
   },
 
-  // Interview generation type
-  type: {
-    type: String,
-    enum: ['role', 'resume', 'jd'],
-    required: [true, 'Interview type is required'],
-  },
-
-  // Descriptive title for the session
-  title: {
+  // Target job role
+  role: {
     type: String,
     default: '',
   },
-
-  // Target job role
   jobRole: {
     type: String,
     default: '',
   },
 
   // Years of experience
+  experienceLevel: {
+    type: Number,
+    min: 0,
+    default: 0,
+  },
   experience: {
     type: Number,
     min: 0,
     default: 0,
   },
 
+  interviewType: {
+    type: String,
+    default: 'role',
+  },
+
   // Array of interview questions with answers and feedback
+  generatedQuestions: [questionSchema],
   questions: [questionSchema],
 
   // Aggregate scoring
+  score: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null,
+  },
   overallScore: {
     type: Number,
     min: 0,
@@ -96,6 +103,10 @@ const interviewSchema = new mongoose.Schema({
     default: null,
   },
 
+  aiFeedback: {
+    type: String,
+    default: '',
+  },
   overallFeedback: {
     type: String,
     default: '',
@@ -120,7 +131,6 @@ const interviewSchema = new mongoose.Schema({
   },
 });
 
-// Compound index for efficient user + status queries
 interviewSchema.index({ userId: 1, status: 1 });
 interviewSchema.index({ userId: 1, createdAt: -1 });
 

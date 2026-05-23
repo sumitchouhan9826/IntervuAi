@@ -1,5 +1,6 @@
 import JDAnalysis from '../models/JDAnalysis.js';
 import ResumeAnalysis from '../models/ResumeAnalysis.js';
+import RecentActivity from '../models/RecentActivity.js';
 import { analyzeJobDescription } from '../services/jdMatcher.js';
 import { getAuth } from '@clerk/express';
 
@@ -36,6 +37,19 @@ export const analyzeJD = async (req, res) => {
       missingSkills: analysis.missingSkills || [],
       recommendations: analysis.recommendations || [],
     });
+
+    // Create RecentActivity entry
+    try {
+      await RecentActivity.create({
+        userId,
+        title: `Job Description Match — ${savedAnalysis.jobTitle} at ${savedAnalysis.company || 'Tech Company'} (${savedAnalysis.matchPercentage}% Match)`,
+        type: 'jd_analysis',
+        referenceId: savedAnalysis._id,
+        score: savedAnalysis.matchPercentage,
+      });
+    } catch (activityError) {
+      console.error('Failed to log RecentActivity for analyzeJD:', activityError);
+    }
 
     res.status(201).json(savedAnalysis);
   } catch (error) {

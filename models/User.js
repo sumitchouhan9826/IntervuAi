@@ -1,13 +1,12 @@
 /**
  * User Model
  * Stores user profile data synced from Clerk authentication.
- * Tracks subscription plan and uploaded resumes.
+ * Tracks subscription plan and mock interview session counts across flows.
  */
 
 import mongoose from 'mongoose';
 
 const userSchema = new mongoose.Schema({
-  // Clerk authentication identifier
   clerkId: {
     type: String,
     required: [true, 'Clerk ID is required'],
@@ -15,7 +14,12 @@ const userSchema = new mongoose.Schema({
     index: true,
   },
 
-  // User email address
+  name: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -23,20 +27,7 @@ const userSchema = new mongoose.Schema({
     trim: true,
   },
 
-  // Profile information
-  firstName: {
-    type: String,
-    trim: true,
-    default: '',
-  },
-
-  lastName: {
-    type: String,
-    trim: true,
-    default: '',
-  },
-
-  profileImage: {
+  imageUrl: {
     type: String,
     default: '',
   },
@@ -48,38 +39,32 @@ const userSchema = new mongoose.Schema({
     default: 'free',
   },
 
-  // Uploaded resumes array
-  resumes: [
-    {
-      fileName: {
-        type: String,
-        required: true,
-      },
-      fileUrl: {
-        type: String,
-        required: true,
-      },
-      uploadedAt: {
-        type: Date,
-        default: Date.now,
-      },
-    },
-  ],
+  // Dynamic practice tracking metrics
+  totalInterviews: {
+    type: Number,
+    default: 0,
+  },
+
+  totalResumeAnalyses: {
+    type: Number,
+    default: 0,
+  },
+
+  totalJDAnalyses: {
+    type: Number,
+    default: 0,
+  },
+
+  lastLogin: {
+    type: Date,
+    default: Date.now,
+  },
 
   createdAt: {
     type: Date,
     default: Date.now,
   },
 });
-
-// Virtual for full name
-userSchema.virtual('fullName').get(function () {
-  return `${this.firstName || ''} ${this.lastName || ''}`.trim();
-});
-
-// Ensure virtuals are included in JSON output
-userSchema.set('toJSON', { virtuals: true });
-userSchema.set('toObject', { virtuals: true });
 
 const User = mongoose.model('User', userSchema);
 

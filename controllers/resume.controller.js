@@ -1,48 +1,117 @@
+import fs from 'fs';
+import path from 'path';
 import multer from 'multer';
 import ResumeAnalysis from '../models/ResumeAnalysis.js';
-import User from '../models/User.js';
-import { uploadToCloudinary } from '../config/cloudinary.js';
+import RecentActivity from '../models/RecentActivity.js';
 import { analyzeResume, extractTextFromPDF } from '../services/resumeAnalyzer.js';
 import { getAuth } from '@clerk/express';
 
-// Configure multer for in-memory file storage with 10MB limit
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Ensure uploads/ directory exists
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for temporary disk storage with 10MB limit
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${req.auth?.userId || 'temp'}_${Date.now()}${ext}`);
+  }
+});
+
+// PDF-only file filter
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype === 'application/pdf') {
+    cb(null, true);
+  } else {
+    cb(new Error('Only PDF files are allowed!'), false);
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 export const uploadMiddleware = upload.single('resume');
 
 /**
- * Upload a resume file to Cloudinary and save reference to user profile.
+ * Upload a resume PDF temporarily, parse text, run Groq AI analysis,
+ * save only parsed/AI-generated data to MongoDB, and unlink local file.
  * POST /api/resume/upload
  */
 export const uploadResume = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'No file uploaded or file type is not PDF' });
     }
 
     const { userId } = getAuth(req);
-    
-    // Upload to Cloudinary
-    const result = await uploadToCloudinary(req.file.buffer, {
-      folder: 'intervuai/resumes',
-      resource_type: 'raw',
-      public_id: `${userId}_${Date.now()}`,
+    const filePath = req.file.path;
+
+    let parsedText = '';
+    let analysisResult = null;
+
+    try {
+      // 1. Read file and extract text
+      const buffer = fs.readFileSync(filePath);
+      parsedText = await extractTextFromPDF(buffer);
+
+      // 2. Analyze with Groq
+      analysisResult = await analyzeResume(parsedText);
+    } catch (parseOrAnalyzeError) {
+      console.error('[ResumeController] Error parsing or analyzing:', parseOrAnalyzeError);
+      return res.status(500).json({ error: 'Failed to process resume: ' + parseOrAnalyzeError.message });
+    } finally {
+      // 3. Delete temporary file from uploads/
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log('[ResumeController] Temporary upload file deleted successfully:', filePath);
+        }
+      } catch (unlinkError) {
+        console.error('[ResumeController] Failed to delete temporary file:', unlinkError);
+      }
+    }
+
+    // 4. Save parsed/AI-generated data in MongoDB
+    const savedAnalysis = await ResumeAnalysis.create({
+      userId,
+      fileName: req.file.originalname || 'resume.pdf',
+      parsedText,
+      atsScore: analysisResult.atsScore,
+      strengths: analysisResult.strengths,
+      weaknesses: analysisResult.weaknesses,
+      suggestions: analysisResult.suggestions,
+      skills: analysisResult.skills,
+      missingSkills: analysisResult.missingSkills,
+      technicalQuestions: analysisResult.technicalQuestions,
+      hrQuestions: analysisResult.hrQuestions,
+      difficultyLevel: analysisResult.difficultyLevel,
     });
 
-    // Save to user's resumes
-    await User.findOneAndUpdate(
-      { clerkId: userId },
-      { $push: { resumes: { fileName: req.file.originalname, fileUrl: result.secure_url, uploadedAt: new Date() } } },
-      { upsert: true }
-    );
+    // 5. Create RecentActivity
+    await RecentActivity.create({
+      userId,
+      title: `Resume Uploaded & Analyzed — ATS: ${savedAnalysis.atsScore}%`,
+      type: 'resume_analysis',
+      referenceId: savedAnalysis._id,
+      score: savedAnalysis.atsScore,
+    });
 
+    console.log('[ResumeController] Returning structured upload analysis result');
     res.status(201).json({
-      message: 'Resume uploaded successfully',
-      resume: { fileName: req.file.originalname, fileUrl: result.secure_url },
+      success: true,
+      analysis: savedAnalysis,
     });
   } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: 'Failed to upload resume' });
+    console.error('[ResumeController] Upload resume handler error:', error);
+    res.status(500).json({ error: 'Failed to upload and analyze resume' });
   }
 };
 
@@ -53,11 +122,25 @@ export const uploadResume = async (req, res) => {
 export const parseResume = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'No file uploaded or file type is not PDF' });
     }
 
-    // Extract text from PDF buffer
-    const text = await extractTextFromPDF(req.file.buffer);
+    const filePath = req.file.path;
+    let text = '';
+
+    try {
+      const buffer = fs.readFileSync(filePath);
+      text = await extractTextFromPDF(buffer);
+    } finally {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log('[ResumeController] Temporary parse file deleted successfully:', filePath);
+        }
+      } catch (unlinkError) {
+        console.error('[ResumeController] Failed to delete temporary file:', unlinkError);
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -65,11 +148,10 @@ export const parseResume = async (req, res) => {
       text,
     });
   } catch (error) {
-    console.error('Parse resume error:', error);
+    console.error('[ResumeController] Parse resume error:', error);
     res.status(500).json({ error: 'Failed to parse resume PDF file: ' + error.message });
   }
 };
-
 
 /**
  * Analyze resume text using AI and persist the analysis results.
@@ -78,36 +160,45 @@ export const parseResume = async (req, res) => {
 export const analyzeResumeHandler = async (req, res) => {
   try {
     const { userId } = getAuth(req);
-    const { resumeText, fileName, fileUrl } = req.body;
+    const { resumeText, fileName } = req.body;
 
-    let textToAnalyze = resumeText;
-
-    // If no text provided but a file was uploaded, extract text from PDF
-    if (!textToAnalyze && req.file) {
-      textToAnalyze = await extractTextFromPDF(req.file.buffer);
-    }
-
-    if (!textToAnalyze) {
+    if (!resumeText) {
       return res.status(400).json({ error: 'No resume text provided' });
     }
 
-    const analysis = await analyzeResume(textToAnalyze);
+    const analysisResult = await analyzeResume(resumeText);
 
     const savedAnalysis = await ResumeAnalysis.create({
       userId,
       fileName: fileName || 'resume.pdf',
-      fileUrl: fileUrl || '',
-      parsedText: textToAnalyze,
-      atsScore: analysis.atsScore,
-      strengths: analysis.strengths,
-      weaknesses: analysis.weaknesses,
-      suggestions: analysis.suggestions,
-      skills: analysis.skills,
+      parsedText: resumeText,
+      atsScore: analysisResult.atsScore,
+      strengths: analysisResult.strengths,
+      weaknesses: analysisResult.weaknesses,
+      suggestions: analysisResult.suggestions,
+      skills: analysisResult.skills,
+      missingSkills: analysisResult.missingSkills,
+      technicalQuestions: analysisResult.technicalQuestions,
+      hrQuestions: analysisResult.hrQuestions,
+      difficultyLevel: analysisResult.difficultyLevel,
     });
 
-    res.status(201).json(savedAnalysis);
+    // Create RecentActivity
+    await RecentActivity.create({
+      userId,
+      title: `Resume Text Analyzed — ATS: ${savedAnalysis.atsScore}%`,
+      type: 'resume_analysis',
+      referenceId: savedAnalysis._id,
+      score: savedAnalysis.atsScore,
+    });
+
+    console.log('[ResumeController] Returning structured text analysis result');
+    res.status(201).json({
+      success: true,
+      analysis: savedAnalysis,
+    });
   } catch (error) {
-    console.error('Analysis error:', error);
+    console.error('[ResumeController] Analysis error:', error);
     res.status(500).json({ error: 'Failed to analyze resume' });
   }
 };
@@ -136,7 +227,11 @@ export const getAnalysis = async (req, res) => {
     if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
     const { userId } = getAuth(req);
     if (analysis.userId !== userId) return res.status(403).json({ error: 'Unauthorized' });
-    res.json(analysis);
+    console.log('[ResumeController] Returning structured single analysis fetch result');
+    res.json({
+      success: true,
+      analysis,
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch analysis' });
   }
