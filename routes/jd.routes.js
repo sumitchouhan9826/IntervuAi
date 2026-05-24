@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware.js';
+import { expensiveLimiter } from '../middleware/rateLimiter.middleware.js';
 import { analyzeJD, getAnalyses, getAnalysis } from '../controllers/jd.controller.js';
 
 const router = Router();
@@ -8,7 +9,7 @@ const router = Router();
 router.use(requireAuth());
 
 // POST /api/jd/analyze - Analyze a job description with AI
-router.post('/analyze', analyzeJD);
+router.post('/analyze', expensiveLimiter, analyzeJD);
 
 // GET /api/jd/analyses - List all JD analyses for the user
 router.get('/analyses', getAnalyses);

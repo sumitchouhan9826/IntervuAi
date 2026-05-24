@@ -35,7 +35,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
 
 export const uploadMiddleware = upload.single('resume');
@@ -46,40 +46,23 @@ export const uploadMiddleware = upload.single('resume');
  * POST /api/resume/upload
  */
 export const uploadResume = async (req, res) => {
+  let filePath = null;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded or file type is not PDF' });
     }
 
     const { userId } = getAuth(req);
-    const filePath = req.file.path;
+    filePath = req.file.path;
 
-    let parsedText = '';
-    let analysisResult = null;
+    // 1. Read file and extract text
+    const buffer = fs.readFileSync(filePath);
+    const parsedText = await extractTextFromPDF(buffer);
 
-    try {
-      // 1. Read file and extract text
-      const buffer = fs.readFileSync(filePath);
-      parsedText = await extractTextFromPDF(buffer);
+    // 2. Analyze with Groq
+    const analysisResult = await analyzeResume(parsedText);
 
-      // 2. Analyze with Groq
-      analysisResult = await analyzeResume(parsedText);
-    } catch (parseOrAnalyzeError) {
-      console.error('[ResumeController] Error parsing or analyzing:', parseOrAnalyzeError);
-      return res.status(500).json({ error: 'Failed to process resume: ' + parseOrAnalyzeError.message });
-    } finally {
-      // 3. Delete temporary file from uploads/
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log('[ResumeController] Temporary upload file deleted successfully:', filePath);
-        }
-      } catch (unlinkError) {
-        console.error('[ResumeController] Failed to delete temporary file:', unlinkError);
-      }
-    }
-
-    // 4. Save parsed/AI-generated data in MongoDB
+    // 3. Save parsed/AI-generated data in MongoDB
     const savedAnalysis = await ResumeAnalysis.create({
       userId,
       fileName: req.file.originalname || 'resume.pdf',
@@ -95,7 +78,7 @@ export const uploadResume = async (req, res) => {
       difficultyLevel: analysisResult.difficultyLevel,
     });
 
-    // 5. Create RecentActivity
+    // 4. Create RecentActivity
     await RecentActivity.create({
       userId,
       title: `Resume Uploaded & Analyzed — ATS: ${savedAnalysis.atsScore}%`,
@@ -105,13 +88,24 @@ export const uploadResume = async (req, res) => {
     });
 
     console.log('[ResumeController] Returning structured upload analysis result');
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       analysis: savedAnalysis,
     });
   } catch (error) {
     console.error('[ResumeController] Upload resume handler error:', error);
-    res.status(500).json({ error: 'Failed to upload and analyze resume' });
+    return res.status(500).json({ error: 'Failed to upload and analyze resume: ' + error.message });
+  } finally {
+    if (filePath) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log('[ResumeController] Temporary upload file deleted successfully:', filePath);
+        }
+      } catch (unlinkError) {
+        console.error('[ResumeController] Failed to delete temporary file:', unlinkError);
+      }
+    }
   }
 };
 
@@ -120,18 +114,26 @@ export const uploadResume = async (req, res) => {
  * POST /api/resume/parse
  */
 export const parseResume = async (req, res) => {
+  let filePath = null;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded or file type is not PDF' });
     }
 
-    const filePath = req.file.path;
-    let text = '';
+    filePath = req.file.path;
+    const buffer = fs.readFileSync(filePath);
+    const text = await extractTextFromPDF(buffer);
 
-    try {
-      const buffer = fs.readFileSync(filePath);
-      text = await extractTextFromPDF(buffer);
-    } finally {
+    return res.status(200).json({
+      success: true,
+      message: 'Resume parsed successfully',
+      text,
+    });
+  } catch (error) {
+    console.error('[ResumeController] Parse resume error:', error);
+    return res.status(500).json({ error: 'Failed to parse resume PDF file: ' + error.message });
+  } finally {
+    if (filePath) {
       try {
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
@@ -141,15 +143,6 @@ export const parseResume = async (req, res) => {
         console.error('[ResumeController] Failed to delete temporary file:', unlinkError);
       }
     }
-
-    res.status(200).json({
-      success: true,
-      message: 'Resume parsed successfully',
-      text,
-    });
-  } catch (error) {
-    console.error('[ResumeController] Parse resume error:', error);
-    res.status(500).json({ error: 'Failed to parse resume PDF file: ' + error.message });
   }
 };
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware.js';
+import { expensiveLimiter } from '../middleware/rateLimiter.middleware.js';
 import {
   generateInterview,
   submitAnswer,
@@ -16,13 +17,13 @@ const router = Router();
 router.use(requireAuth());
 
 // POST /api/interviews/generate - Generate a new AI interview
-router.post('/generate', generateInterview);
+router.post('/generate', expensiveLimiter, generateInterview);
 
 // POST /api/interviews/:id/answer - Submit an answer for a question
-router.post('/:id/answer', submitAnswer);
+router.post('/:id/answer', expensiveLimiter, submitAnswer);
 
 // POST /api/interviews/:id/complete - Mark interview as complete and get feedback
-router.post('/:id/complete', completeInterview);
+router.post('/:id/complete', expensiveLimiter, completeInterview);
 
 // GET /api/interviews/stats - Get user's interview statistics
 router.get('/stats', getStats);

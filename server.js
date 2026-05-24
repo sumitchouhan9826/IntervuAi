@@ -3,9 +3,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import { clerkMiddleware } from '@clerk/express';
 import connectDB  from './config/db.js';
+import { standardLimiter } from './middleware/rateLimiter.middleware.js';
+import { errorHandler } from './middleware/error.middleware.js';
 import userRoutes from './routes/user.routes.js';
 import interviewRoutes from './routes/interview.routes.js';
 import resumeRoutes from './routes/resume.routes.js';
@@ -25,14 +26,7 @@ app.use(cors({
 }));
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
-});
-app.use('/api/', limiter);
+app.use('/api/', standardLimiter);
 
 // Body parsing
 app.use(express.json({ limit: '50mb' }));
@@ -47,12 +41,22 @@ if (process.env.NODE_ENV !== 'production') {
 app.use(clerkMiddleware());
 
 // Routes
+// Versioned APIs (v1)
+app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/interviews', interviewRoutes);
+app.use('/api/v1/resume', resumeRoutes);
+app.use('/api/v1/jd', jdRoutes);
+
+// Legacy APIs (for backwards compatibility)
 app.use('/api/users', userRoutes);
 app.use('/api/interviews', interviewRoutes);
 app.use('/api/resume', resumeRoutes);
 app.use('/api/jd', jdRoutes);
 
 // Health check
+app.get('/api/v1/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -63,16 +67,7 @@ app.use((req, res) => {
 });
 
 // Global error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err.message);
-  console.error(err.stack);
-  
-  const statusCode = err.statusCode || 500;
-  res.status(statusCode).json({
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
-  });
-});
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`🚀 IntervuAI server running on port ${PORT}`);

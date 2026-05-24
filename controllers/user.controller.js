@@ -5,6 +5,7 @@
 
 import User from '../models/User.js';
 import { getAuth } from '@clerk/express';
+import cacheService from '../services/cache.service.js';
 
 /**
  * POST /api/users/sync
@@ -155,13 +156,29 @@ export const updateProfile = async (req, res) => {
 export const getRecentActivity = async (req, res) => {
   try {
     const { userId } = getAuth(req);
+    const cacheKey = `activity_${userId}`;
+
+    // Try cache hit
+    const cachedData = cacheService.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        data: cachedData,
+      });
+    }
     
     // Import dynamically or keep standard import at the top
     const RecentActivity = (await import('../models/RecentActivity.js')).default;
     
+    // DB query optimized with lean() and select()
     const activities = await RecentActivity.find({ userId })
       .sort({ createdAt: -1 })
-      .limit(10);
+      .limit(10)
+      .select('title type score duration referenceId createdAt')
+      .lean();
+
+    // Cache for 5 minutes (300 seconds)
+    cacheService.set(cacheKey, activities, 300);
 
     res.status(200).json({
       success: true,

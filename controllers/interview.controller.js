@@ -12,6 +12,7 @@ import ResumeAnalysis from '../models/ResumeAnalysis.js';
 import JDAnalysis from '../models/JDAnalysis.js';
 import User from '../models/User.js';
 import mongoose from 'mongoose';
+import cacheService from '../services/cache.service.js';
 import {
   generateQuestions,
   evaluateAnswer,
@@ -196,6 +197,16 @@ export const generateInterview = async (req, res) => {
       });
     } catch (activityError) {
       console.error('Failed to log RecentActivity for generateInterview:', activityError);
+    }
+
+    // Invalidate cached lists, stats, and activity
+    try {
+      cacheService.delete(`stats_${userId}`);
+      cacheService.clearPattern(`^list_${userId}_`);
+      cacheService.delete(`activity_${userId}`);
+      console.log(`[Cache] Invalidated statistics, history lists, and activity for user: ${userId}`);
+    } catch (cacheError) {
+      console.error('Failed to invalidate cache:', cacheError);
     }
 
     res.status(201).json({
@@ -405,6 +416,16 @@ export const completeInterview = async (req, res) => {
 
     const summary = generateSessionSummary(session);
 
+    // Invalidate cached lists, stats, and activity
+    try {
+      cacheService.delete(`stats_${userId}`);
+      cacheService.clearPattern(`^list_${userId}_`);
+      cacheService.delete(`activity_${userId}`);
+      console.log(`[Cache] Invalidated statistics, history lists, and activity for user: ${userId}`);
+    } catch (cacheError) {
+      console.error('Failed to invalidate cache:', cacheError);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Mock session completed successfully',
@@ -441,8 +462,20 @@ export const listInterviews = async (req, res) => {
 
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(50, Math.max(1, Number(limit)));
+    
+    const cacheKey = `list_${userId}_page_${pageNum}_limit_${limitNum}_type_${type || 'all'}_status_${status || 'all'}_sort_${sort}`;
 
-    // Fetch lists from the targeted or all collections
+    // Try cache hit
+    const cachedData = cacheService.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        data: cachedData.paginated,
+        pagination: cachedData.pagination
+      });
+    }
+
+    // Fetch lists from the targeted or all collections with lean() and select() optimizations
     let roles = [];
     let resumes = [];
     let jds = [];
@@ -450,7 +483,7 @@ export const listInterviews = async (req, res) => {
     if (!type || type === 'role') {
       const filter = { userId };
       if (status) filter.status = status;
-      roles = await Interview.find(filter).select('-generatedQuestions -questions');
+      roles = await Interview.find(filter).select('-generatedQuestions -questions').lean();
     }
 
     if (!type || type === 'resume') {
@@ -458,7 +491,7 @@ export const listInterviews = async (req, res) => {
       if (status) filter.status = status;
       // Fetch only resume analyses that are initialized with mock questions
       filter.generatedQuestions = { $exists: true, $ne: [] };
-      resumes = await ResumeAnalysis.find(filter).select('-generatedQuestions -questions -extractedText -parsedText');
+      resumes = await ResumeAnalysis.find(filter).select('-generatedQuestions -questions -extractedText -parsedText').lean();
     }
 
     if (!type || type === 'jd') {
@@ -466,16 +499,16 @@ export const listInterviews = async (req, res) => {
       if (status) filter.status = status;
       // Fetch only JD analyses that are initialized with mock questions
       filter.generatedQuestions = { $exists: true, $ne: [] };
-      jds = await JDAnalysis.find(filter).select('-generatedQuestions -questions -jobDescription');
+      jds = await JDAnalysis.find(filter).select('-generatedQuestions -questions -jobDescription').lean();
     }
 
     // Unify lists dynamically
     const unified = [
       ...roles.map(r => ({
         _id: r._id,
-        title: r.title || `${r.role} Mock Interview`,
+        title: r.title || r.role || `${r.jobRole || 'Software'} Mock Interview`,
         type: 'role',
-        overallScore: r.overallScore !== null ? r.overallScore : r.score,
+        overallScore: r.overallScore !== null && r.overallScore !== undefined ? r.overallScore : r.score,
         duration: r.duration,
         status: r.status,
         createdAt: r.createdAt
@@ -491,7 +524,7 @@ export const listInterviews = async (req, res) => {
       })),
       ...jds.map(r => ({
         _id: r._id,
-        title: `${r.jobTitle} at ${r.company} Match`,
+        title: r.jobTitle ? `${r.jobTitle} at ${r.company || 'Company'} Match` : 'JD Mock Session',
         type: 'jd',
         overallScore: r.overallScore,
         duration: r.duration,
@@ -518,15 +551,20 @@ export const listInterviews = async (req, res) => {
     const total = unified.length;
     const paginated = unified.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
+    const paginationResult = {
+      page: pageNum,
+      limit: limitNum,
+      total,
+      pages: Math.ceil(total / limitNum),
+    };
+
+    // Cache the result for 5 minutes (300 seconds)
+    cacheService.set(cacheKey, { paginated, pagination: paginationResult }, 300);
+
     res.status(200).json({
       success: true,
       data: paginated,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        pages: Math.ceil(total / limitNum),
-      },
+      pagination: paginationResult,
     });
   } catch (error) {
     console.error('List interviews error:', error);
@@ -545,16 +583,26 @@ export const listInterviews = async (req, res) => {
 export const getStats = async (req, res) => {
   try {
     const { userId } = getAuth(req);
+    const cacheKey = `stats_${userId}`;
 
-    // Fetch from all three collections in parallel
+    // Try cache hit
+    const cachedData = cacheService.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        data: cachedData
+      });
+    }
+
+    // Fetch from all three collections in parallel with lean() and select() optimizations
     const [roles, resumes, jds] = await Promise.all([
-      Interview.find({ userId }).select('overallScore score duration status createdAt'),
-      ResumeAnalysis.find({ userId, generatedQuestions: { $exists: true, $ne: [] } }).select('overallScore duration status createdAt'),
-      JDAnalysis.find({ userId, generatedQuestions: { $exists: true, $ne: [] } }).select('overallScore duration status createdAt')
+      Interview.find({ userId }).select('overallScore score duration status createdAt').lean(),
+      ResumeAnalysis.find({ userId, generatedQuestions: { $exists: true, $ne: [] } }).select('overallScore duration status createdAt').lean(),
+      JDAnalysis.find({ userId, generatedQuestions: { $exists: true, $ne: [] } }).select('overallScore duration status createdAt').lean()
     ]);
 
     const unified = [
-      ...roles.map(r => ({ score: r.overallScore !== null ? r.overallScore : r.score, duration: r.duration, status: r.status, createdAt: r.createdAt })),
+      ...roles.map(r => ({ score: r.overallScore !== null && r.overallScore !== undefined ? r.overallScore : r.score, duration: r.duration, status: r.status, createdAt: r.createdAt })),
       ...resumes.map(r => ({ score: r.overallScore, duration: r.duration, status: r.status, createdAt: r.createdAt })),
       ...jds.map(r => ({ score: r.overallScore, duration: r.duration, status: r.status, createdAt: r.createdAt }))
     ];
@@ -580,15 +628,20 @@ export const getStats = async (req, res) => {
         date: i.createdAt
       }));
 
+    const statsResult = {
+      totalSessions: unified.length,
+      completedSessions: completed.length,
+      totalHours,
+      averageScore,
+      recentScores
+    };
+
+    // Cache the result for 5 minutes (300 seconds)
+    cacheService.set(cacheKey, statsResult, 300);
+
     res.status(200).json({
       success: true,
-      data: {
-        totalSessions: unified.length,
-        completedSessions: completed.length,
-        totalHours,
-        averageScore,
-        recentScores
-      }
+      data: statsResult
     });
   } catch (error) {
     console.error('Get stats error:', error);
@@ -654,6 +707,16 @@ export const deleteInterview = async (req, res) => {
         success: false,
         message: 'Mock session not found',
       });
+    }
+
+    // Invalidate cached lists, stats, and activity
+    try {
+      cacheService.delete(`stats_${userId}`);
+      cacheService.clearPattern(`^list_${userId}_`);
+      cacheService.delete(`activity_${userId}`);
+      console.log(`[Cache] Invalidated statistics, history lists, and activity for user: ${userId}`);
+    } catch (cacheError) {
+      console.error('Failed to invalidate cache:', cacheError);
     }
 
     res.status(200).json({

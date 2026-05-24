@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Email is required'],
     lowercase: true,
     trim: true,
+    index: true,
   },
 
   imageUrl: {
